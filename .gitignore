@@ -1,12 +1,45 @@
-venv
+# Python
 venv/
-airflow.log
-__pycache__
+__pycache__/
 *.pyc
+*.pyo
+*.pyd
+.Python
+
+# Airflow specific
+airflow.log
+airflow/logs/
+airflow/*.db
+airflow/airflow.db*
+airflow/unittests.cfg
+airflow/webserver_config.py
+airflow.cfg.lock
+simple_auth_manager_passwords.json.generated
+
+# Claude Code configuration
+.claude/
+.claude.json
+.claude.json.backup
+
+# System/Development tools
 .Xauthority
-.vscode-server
+.vscode-server/
 .ssh/
 .local/
 .dotnet/
 .cache/
+.config/
+.npm/
+.gitconfig
+.wget-hsts
+
+# Logs
 npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+/tmp/
