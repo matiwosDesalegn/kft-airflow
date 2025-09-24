@@ -1,0 +1,12 @@
+venv
+venv/
+airflow.log
+__pycache__
+*.pyc
+.Xauthority
+.vscode-server
+.ssh/
+.local/
+.dotnet/
+.cache/
+npm-debug.log*
