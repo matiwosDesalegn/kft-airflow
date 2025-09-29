@@ -29,7 +29,7 @@ source /home/airflow/venv/bin/activate
 - Uses modern `schedule=timedelta(days=1)` syntax (not deprecated `schedule_interval`)
 - Standard BashOperator usage with retry logic
 
-**Production Workflow Pattern** (`full_database_restore_workflow.py`):
+**Production Workflow Pattern** (`zemzem_full_database_restore_workflow.py`):
 - Complex S3-based data pipeline for database restoration
 - Multi-database support (PostgreSQL + MongoDB)
 - XCom for inter-task communication
@@ -60,7 +60,7 @@ Install project-specific packages:
 ```bash
 pip install -r requirements_workflow.txt
 ```
-Core dependencies: `boto3>=1.26.0`, `pymongo>=4.0.0`, `psycopg2-binary>=2.9.0`
+Core dependencies: `boto3>=1.26.0`, `pymongo>=4.0.0`, `psycopg2-binary>=2.9.0`, `pandas>=2.0.0`, `sqlalchemy>=1.4.49,<2.0`
 
 ## Data Pipeline Architecture
 
@@ -118,11 +118,13 @@ Core dependencies: `boto3>=1.26.0`, `pymongo>=4.0.0`, `psycopg2-binary>=2.9.0`
 - Production RDS credentials: de-ingester-instance-1.coo17ussvrhh.us-east-1.rds.amazonaws.com
 
 ### ✅ Database Restoration Workflow (Phase 2)
-**Updated DAG** (`full_database_restore_workflow.py`):
+**Updated DAG** (`zemzem_full_database_restore_workflow.py`):
 - Fixed for Airflow 3.0.6 compatibility (schedule parameter, operator imports)
 - Added POSTGRES_PASSWORD variable and PGPASSWORD authentication
+- **Enhanced Data Processing**: Complete ETL pipeline with MongoDB → PostgreSQL transformation
+- **Data Processing Features**: Customer data denormalization, loan processes, scoring history
 - DAG successfully recognized by Airflow (no import errors)
-- Dependencies installed: boto3>=1.26.0, pymongo>=4.0.0, psycopg2-binary>=2.9.0
+- Dependencies installed: boto3, pymongo, psycopg2-binary, pandas, sqlalchemy
 
 **S3 Connectivity Verified**:
 - AWS credentials working (access key ending Q7EU, region us-east-1)
@@ -198,9 +200,49 @@ The `get_container_ips.sh` script shows both container internal IPs and host mac
 ```bash
 # Activate environment and trigger workflow
 source /home/airflow/venv/bin/activate
-airflow dags trigger full_database_restore_workflow
+airflow dags trigger zemzem_full_database_restore_workflow
 ```
 
 **Workflow Stages**: S3 File Discovery → Local Database Restoration → Data Processing → Production RDS Loading
+
+## 📊 Data Processing Pipeline
+
+The `process_mongodb_data` task implements a comprehensive ETL pipeline:
+
+### **Extract Phase**
+- Connects to restored MongoDB databases (`customer-management_db`, `decision-db`)
+- Exports all collections to JSON files in `/tmp/mongo_json_exports`
+- Converts MongoDB ObjectIds to strings for processing
+
+### **Transform Phase**
+**Customer Data Processing**:
+- Denormalizes nested MongoDB documents into flat PostgreSQL tables
+- Handles nested arrays: businesses, bankInformations, personalAddresses, educationalLevels, maritalStatuses
+- Explodes business addresses for multiple rows per customer
+- Merges all related data using customer `_id` as key
+- Applies column renaming for consistency (e.g., `business_businessName` → `business_Name`)
+
+**Loan Processes Data**:
+- Processes `decision-db_loan-processes` collection
+- Explodes `ordered_items` arrays when present
+- Flattens nested JSON structures
+
+**Scoring History Data**:
+- Processes `decision-db_scoring-history` collection
+- Handles MongoDB ObjectId conversion (`_id.$oid` → `_id`)
+- Direct mapping to flat PostgreSQL table
+
+### **Load Phase**
+- **Target**: Production PostgreSQL RDS (ansar database)
+- **Strategy**: TRUNCATE and LOAD (full refresh, not incremental)
+- **Tables Created**: `customers`, `loan_processes`, `scoring_history`
+- **Data Quality**: Includes error handling, logging, and connection cleanup
+
+### **Key Features**
+- Uses Airflow Variables for all database connections
+- Comprehensive error handling with detailed logging
+- Automatic temporary file cleanup
+- Connection pooling and proper resource management
+- Fixed typo: `business_address_` (was `businees_address_`)
 
 The implementation provides complete local testing capability with automatic production deployment to RDS instance.
