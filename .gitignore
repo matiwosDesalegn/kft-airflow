@@ -43,3 +43,10 @@ yarn-error.log*
 *.tmp
 *.temp
 /tmp/
+
+.bash_history
+.wget-hsts
+.aws/
+.kube/
+snap/
+airflow/dags/config/airflow_variables.json
