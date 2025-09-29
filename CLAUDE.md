@@ -144,15 +144,55 @@ Core dependencies: `boto3>=1.26.0`, `pymongo>=4.0.0`, `psycopg2-binary>=2.9.0`
 
 ### 🚀 Ready to Use
 
-**Start Docker Databases**:
-```bash
-# Add airflow user to docker group (requires sudo)
-sudo usermod -aG docker airflow
-newgrp docker
+## Step-by-Step Setup Process
 
-# Launch database services
+1. **Fix Docker Permissions** (run as root or with sudo):
+```bash
+sudo usermod -aG docker airflow
+sudo systemctl restart docker
+# Then logout and login again, or run:
+newgrp docker
+```
+
+2. **Start the Database Services**:
+```bash
 docker-compose up -d
 ```
+
+3. **Get Network Information**:
+```bash
+./get_container_ips.sh
+```
+
+## Connection Configuration for External Tools
+
+### pgAdmin Configuration:
+1. Open `http://localhost:5050` in browser
+2. Login with `admin@admin.com` / `root`
+3. Add new server:
+   - **Name**: Airflow PostgreSQL
+   - **Host**: `localhost` (or container IP from script)
+   - **Port**: `5432`
+   - **Database**: `airflow_restore`
+   - **Username**: `postgres`
+   - **Password**: `airflow123`
+
+### MongoDB Compass Configuration:
+- **Connection String**: `mongodb://mongouser:mongo123@localhost:27017/?authSource=admin`
+- Or manually:
+  - **Host**: `localhost`
+  - **Port**: `27017`
+  - **Authentication**: Username/Password
+  - **Username**: `mongouser`
+  - **Password**: `mongo123`
+  - **Authentication Database**: `admin`
+
+### Database Access Details:
+- **PostgreSQL**: `localhost:5432` (postgres/airflow123)
+- **MongoDB**: `localhost:27017` (mongouser/mongo123)
+- **pgAdmin Web**: `http://localhost:5050` (admin@admin.com/root)
+
+The `get_container_ips.sh` script shows both container internal IPs and host machine access details once Docker is running.
 
 **Run Database Restoration**:
 ```bash
