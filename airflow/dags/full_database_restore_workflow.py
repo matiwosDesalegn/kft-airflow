@@ -5,8 +5,8 @@ import logging
 from typing import List, Tuple
 
 from airflow import DAG
-from airflow.operators.python_operator import PythonOperator
-from airflow.operators.bash_operator import BashOperator
+from airflow.operators.python import PythonOperator
+from airflow.providers.standard.operators.bash import BashOperator
 from airflow.models import Variable
 
 default_args = {
@@ -23,7 +23,7 @@ dag = DAG(
     'full_database_restore_workflow',
     default_args=default_args,
     description='Full restore workflow for PostgreSQL and MongoDB from S3 dumps',
-    schedule_interval=None,  # Manual trigger
+    schedule=None,  # Manual trigger
     catchup=False,
     max_active_runs=1,
     tags=['restore', 'database', 's3', 'postgresql', 'mongodb']
@@ -232,10 +232,14 @@ restore_postgres_dump_task = BashOperator(
     PG_HOST="{{ var.value.get('POSTGRES_HOST', 'localhost') }}"
     PG_PORT="{{ var.value.get('POSTGRES_PORT', '5432') }}"
     PG_USER="{{ var.value.get('POSTGRES_USER', 'postgres') }}"
+    PG_PASSWORD="{{ var.value.get('POSTGRES_PASSWORD', '') }}"
     PG_DB="{{ var.value.get('POSTGRES_DB', 'your_database') }}"
 
     echo "Starting full PostgreSQL restore with clean option..."
     echo "Target: $PG_HOST:$PG_PORT/$PG_DB as user $PG_USER"
+
+    # Set PGPASSWORD environment variable for authentication
+    export PGPASSWORD="$PG_PASSWORD"
 
     # Perform full restore with --clean flag to drop existing objects first
     pg_restore --verbose --clean --no-acl --no-owner \
@@ -308,7 +312,43 @@ process_mongodb_data_task = PythonOperator(
     dag=dag,
 )
 
+# Task 6: Load Processed Data to Production RDS
+load_to_production_task = BashOperator(
+    task_id='load_to_production_rds',
+    bash_command="""
+    # Get production database connection details from Airflow Variables
+    PROD_PG_HOST="{{ var.value.get('PRODUCTION_POSTGRES_HOST', '') }}"
+    PROD_PG_PORT="{{ var.value.get('PRODUCTION_POSTGRES_PORT', '5432') }}"
+    PROD_PG_USER="{{ var.value.get('PRODUCTION_POSTGRES_USER', 'postgres') }}"
+    PROD_PG_PASSWORD="{{ var.value.get('PRODUCTION_POSTGRES_PASSWORD', '') }}"
+    PROD_PG_DB="{{ var.value.get('PRODUCTION_POSTGRES_DB', 'ansar') }}"
+
+    echo "Loading processed data to production RDS..."
+    echo "Target: $PROD_PG_HOST:$PROD_PG_PORT/$PROD_PG_DB as user $PROD_PG_USER"
+
+    # Set PGPASSWORD environment variable for authentication
+    export PGPASSWORD="$PROD_PG_PASSWORD"
+
+    # Example: Connect to production database and run data processing queries
+    # This is a placeholder - actual implementation would depend on your data processing needs
+    psql -h $PROD_PG_HOST \
+         -p $PROD_PG_PORT \
+         -U $PROD_PG_USER \
+         -d $PROD_PG_DB \
+         -c "SELECT 'Production database connection successful' as status;"
+
+    if [ $? -eq 0 ]; then
+        echo "Production database connection verified successfully"
+        echo "Ready for data processing and loading operations"
+    else
+        echo "Failed to connect to production database"
+        exit 1
+    fi
+    """,
+    dag=dag,
+)
+
 # Define task dependencies
 find_latest_postgres_dump_task >> restore_postgres_dump_task
 find_latest_mongodb_dump_task >> restore_mongodb_dump_task
-[restore_postgres_dump_task, restore_mongodb_dump_task] >> process_mongodb_data_task
+[restore_postgres_dump_task, restore_mongodb_dump_task] >> process_mongodb_data_task >> load_to_production_task

@@ -1,0 +1,43 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: airflow_postgres
+    environment:
+      POSTGRES_DB: airflow_restore
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: airflow123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - /tmp:/tmp
+    restart: unless-stopped
+
+  mongodb:
+    image: mongo:6.0
+    container_name: airflow_mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: mongouser
+      MONGO_INITDB_ROOT_PASSWORD: mongo123
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+      - /tmp:/tmp
+    restart: unless-stopped
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: airflow_pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: root
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  mongodb_data:
