@@ -50,3 +50,7 @@ yarn-error.log*
 .kube/
 snap/
 airflow/dags/config/airflow_variables.json
+.bashrc
+.npm-global/
+.npmrc
+Airflow.png

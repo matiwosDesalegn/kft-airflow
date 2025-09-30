@@ -140,9 +140,10 @@ def find_latest_postgres_dump(**context):
         local_path = '/tmp/latest_pg.tar'
         download_s3_file(S3_BUCKET_STAGING, latest_s3_key, local_path)
 
-        # Store paths in XCom for next tasks
-        context['task_instance'].xcom_push(key='postgres_dump_path', value=local_path)
-        context['task_instance'].xcom_push(key='postgres_s3_key', value=latest_s3_key)
+        # Store paths in XCom for next tasks (if running in Airflow context)
+        if 'task_instance' in context:
+            context['task_instance'].xcom_push(key='postgres_dump_path', value=local_path)
+            context['task_instance'].xcom_push(key='postgres_s3_key', value=latest_s3_key)
 
         logging.info(f"PostgreSQL dump ready at: {local_path}")
         return local_path
@@ -177,8 +178,9 @@ def find_latest_mongodb_dump(**context):
                 's3_key': latest_s3_key
             })
 
-        # Store information in XCom for next tasks
-        context['task_instance'].xcom_push(key='mongodb_dumps', value=downloaded_files)
+        # Store information in XCom for next tasks (if running in Airflow context)
+        if 'task_instance' in context:
+            context['task_instance'].xcom_push(key='mongodb_dumps', value=downloaded_files)
 
         logging.info(f"MongoDB dumps ready: {[f['local_path'] for f in downloaded_files]}")
         return downloaded_files

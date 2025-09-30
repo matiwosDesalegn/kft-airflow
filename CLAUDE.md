@@ -105,7 +105,7 @@ Core dependencies: `boto3>=1.26.0`, `pymongo>=4.0.0`, `psycopg2-binary>=2.9.0`, 
 
 ### ✅ Local Development Databases (Phase 1)
 **Docker Services Configured** (`docker-compose.yaml`):
-- PostgreSQL 15 service on port 5432 with airflow_restore database
+- PostgreSQL 15 service on port **5435** with airflow_restore database (changed from 5432 due to port conflict)
 - MongoDB 6.0 service on port 27017 with authentication
 - pgAdmin service on port 5050 for database management
 - Shared /tmp volume for restoration file access
@@ -113,9 +113,10 @@ Core dependencies: `boto3>=1.26.0`, `pymongo>=4.0.0`, `psycopg2-binary>=2.9.0`, 
 
 **Airflow Variables Configured**:
 - All 14 variables successfully imported via Airflow CLI
-- Local database credentials: localhost:5432 (postgres/airflow123)
+- Local database credentials: **localhost:5435** (postgres/airflow123)
 - MongoDB credentials: localhost:27017 (mongouser/mongo123)
 - Production RDS credentials: de-ingester-instance-1.coo17ussvrhh.us-east-1.rds.amazonaws.com
+- `POSTGRES_PORT` variable updated to **5435** to match Docker port mapping
 
 ### ✅ Database Restoration Workflow (Phase 2)
 **Updated DAG** (`zemzem_full_database_restore_workflow.py`):
@@ -123,6 +124,9 @@ Core dependencies: `boto3>=1.26.0`, `pymongo>=4.0.0`, `psycopg2-binary>=2.9.0`, 
 - Added POSTGRES_PASSWORD variable and PGPASSWORD authentication
 - **Enhanced Data Processing**: Complete ETL pipeline with MongoDB → PostgreSQL transformation
 - **Data Processing Features**: Customer data denormalization, loan processes, scoring history
+- **XCom Context Safety**: Added conditional checks before XCom push operations (lines 144, 182)
+  - Functions now work both in testing and Airflow execution contexts
+  - Prevents `KeyError: 'task_instance'` when testing tasks directly
 - DAG successfully recognized by Airflow (no import errors)
 - Dependencies installed: boto3, pymongo, psycopg2-binary, pandas, sqlalchemy
 
@@ -174,7 +178,7 @@ docker-compose up -d
 3. Add new server:
    - **Name**: Airflow PostgreSQL
    - **Host**: `localhost` (or container IP from script)
-   - **Port**: `5432`
+   - **Port**: **5435**
    - **Database**: `airflow_restore`
    - **Username**: `postgres`
    - **Password**: `airflow123`
@@ -190,7 +194,7 @@ docker-compose up -d
   - **Authentication Database**: `admin`
 
 ### Database Access Details:
-- **PostgreSQL**: `localhost:5432` (postgres/airflow123)
+- **PostgreSQL**: `localhost:5435` (postgres/airflow123)
 - **MongoDB**: `localhost:27017` (mongouser/mongo123)
 - **pgAdmin Web**: `http://localhost:5050` (admin@admin.com/root)
 
@@ -246,3 +250,119 @@ The `process_mongodb_data` task implements a comprehensive ETL pipeline:
 - Fixed typo: `business_address_` (was `businees_address_`)
 
 The implementation provides complete local testing capability with automatic production deployment to RDS instance.
+
+---
+
+## 🔧 Troubleshooting Guide
+
+### Common Issues and Solutions
+
+#### Issue 1: Port Conflicts During Docker Startup
+**Symptom**: `Error starting userland proxy: listen tcp4 0.0.0.0:5432: bind: address already in use`
+
+**Cause**: System PostgreSQL service running on default port 5432
+
+**Solution**:
+1. Check port usage: `ss -tuln | grep :5432`
+2. Modify `docker-compose.yaml` to use alternative port (5435):
+   ```yaml
+   ports:
+     - "5435:5432"  # Changed from 5432:5432
+   ```
+3. Update Airflow variable:
+   ```bash
+   airflow variables set POSTGRES_PORT 5435
+   ```
+4. Restart containers: `docker-compose up -d`
+
+#### Issue 2: Task Fails with "KeyError: 'task_instance'"
+**Symptom**: Python functions crash when accessing `context['task_instance']`
+
+**Cause**: Functions called outside Airflow execution context (e.g., during testing)
+
+**Solution**: Add conditional checks before XCom operations in DAG Python callables:
+```python
+# Before (causes error):
+context['task_instance'].xcom_push(key='data', value=result)
+
+# After (works in all contexts):
+if 'task_instance' in context:
+    context['task_instance'].xcom_push(key='data', value=result)
+```
+
+**Files Modified**:
+- `/home/airflow/airflow/dags/zemzem_full_database_restore_workflow.py:144` (find_latest_postgres_dump)
+- `/home/airflow/airflow/dags/zemzem_full_database_restore_workflow.py:182` (find_latest_mongodb_dump)
+
+#### Issue 3: Tasks Stuck in "up_for_retry" State
+**Symptom**: Tasks show orange "upstream_failed" status in Airflow UI, cannot be re-run
+
+**Cause**: Previous failed runs left tasks in inconsistent state
+
+**Solution**: Clear task states to reset:
+```bash
+source /home/airflow/venv/bin/activate
+airflow tasks clear zemzem_full_database_restore_workflow --yes
+```
+
+#### Issue 4: Docker Containers Not Running
+**Symptom**: DAG fails at restore tasks, database connection refused
+
+**Diagnosis**:
+```bash
+docker ps --filter "name=airflow_" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+```
+
+**Solution**: Start Docker services:
+```bash
+docker-compose up -d
+```
+
+**Verify Connectivity**:
+```bash
+# PostgreSQL test
+PGPASSWORD=airflow123 psql -h localhost -p 5435 -U postgres -d airflow_restore -c "SELECT 'Connected successfully' as status;"
+
+# MongoDB test (via container)
+docker exec airflow_mongodb mongosh "mongodb://mongouser:mongo123@localhost:27017/?authSource=admin" --eval "db.adminCommand('ping')"
+```
+
+### Testing Individual Tasks
+
+Before running the full DAG, test individual tasks:
+
+```bash
+source /home/airflow/venv/bin/activate
+
+# Test S3 file discovery and download
+airflow tasks test zemzem_full_database_restore_workflow find_latest_postgres_dump 2025-09-30
+airflow tasks test zemzem_full_database_restore_workflow find_latest_mongodb_dump 2025-09-30
+
+# Check downloaded files
+ls -lh /tmp/latest_pg.tar /tmp/*_latest.tar
+```
+
+Expected output:
+- PostgreSQL dump: ~1.4 MB
+- MongoDB dumps: ~17.8 MB (customer-management_db) + ~16.9 MB (decision-db)
+
+### Pre-Flight Checklist
+
+Before triggering the DAG, verify:
+- [ ] Docker containers running: `docker ps | grep airflow_`
+- [ ] Airflow variables set: `airflow variables list`
+- [ ] AWS credentials configured: `aws sts get-caller-identity`
+- [ ] S3 bucket accessible: `aws s3 ls s3://kft-lakehouse-staging/digital_lending/backups/zemzem/`
+- [ ] Database connectivity: Test PostgreSQL and MongoDB connections
+- [ ] DAG recognized: `airflow dags list | grep zemzem`
+- [ ] No task state issues: Check Airflow UI for stuck tasks
+
+### Port Reference
+
+Current port assignments (to avoid conflicts):
+- **5432**: System PostgreSQL 16/17 (native installation)
+- **5433**: kft_local_deepsearch_ai-db (Docker)
+- **5434**: System PostgreSQL (used by system)
+- **5435**: airflow_postgres (Docker) ✅ **Current configuration**
+- **27017**: airflow_mongodb (Docker)
+- **5050**: airflow_pgadmin (Docker)
